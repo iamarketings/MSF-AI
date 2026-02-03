@@ -6,7 +6,7 @@ import os
 import sys
 
 # Ensure package is in path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from msf_aiv4.msf_controller import MSFAIController, setup_readline, save_history
 

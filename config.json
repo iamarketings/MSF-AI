@@ -1,0 +1,5 @@
+{
+    "security_mode": "safe",
+    "api_model": "deepseek-chat",
+    "msf_rpc_port": 55553
+}

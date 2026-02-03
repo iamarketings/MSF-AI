@@ -1,0 +1,10 @@
+openai
+pymetasploit3
+python-dotenv
+beautifulsoup4
+dnspython
+python-whois
+langgraph
+langchain-openai
+langchain-community
+pytest
