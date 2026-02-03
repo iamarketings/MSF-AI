@@ -7,65 +7,79 @@
 > - Ce logiciel est destiné uniquement à des fins éducatives et de tests d'intrusion autorisés dans des environnements contrôlés (LAB).
 > - Les auteurs déclinent toute responsabilité en cas de mauvaise utilisation ou de dommages causés par cet outil.
 
-Ce projet est un assistant propulsé par l'IA pour le Metasploit Framework. Il offre une interface conversationnelle pour interagir avec Metasploit et effectuer diverses tâches de test d'intrusion de manière autonome grâce à une orchestration avancée.
+MSF-AI v4 est un assistant d'automatisation avancé pour le Metasploit Framework, propulsé par l'IA (DeepSeek/APIs compatibles) avec orchestration Langgraph. Le projet démontre une architecture professionnelle orientée audit de sécurité et tests d'intrusion automatisés.
 
-## Features
+## 🎯 Vue d'Ensemble
 
-*   **Conversational AI:** Interact with Metasploit using natural language powered by DeepSeek and compatible APIs.
-*   **Langgraph Orchestration:** A state-of-the-art task orchestrator built with Langgraph that handles planning, execution, and analysis of complex security objectives.
-*   **Security Configuration:** Integrated security modes ("safe" and "unsafe") to control the execution of intrusive or dangerous commands.
-*   **OS Interaction Tools:** Specialized tools for identifying and interacting with local systems (Linux, WSL, Windows).
-*   **Advanced Tool Integration:**
-    *   **Reconnaissance:** Real WHOIS, DNS enumeration, and subdomain discovery.
-    *   **Web Auditing:** Robust form extraction with BeautifulSoup, WAF detection, and security header checks.
-    *   **Post-Exploitation:** Session management and automated command output retrieval.
-*   **RAG (Retrieval-Augmented Generation):** AI-enhanced responses using a dedicated Metasploit knowledge base.
+L'assistant offre une interface conversationnelle pour interagir avec Metasploit et effectuer diverses tâches de test d'intrusion de manière autonome grâce à une orchestration avancée.
 
-## Architecture
+## 📐 Architecture et Design
 
-The project follows a modular MVC (Model-View-Controller) architecture:
-*   `msf_mvc.py`: Main entry point.
-*   `msf_aiv4/msf_controller.py`: Logic coordinator.
-*   `msf_aiv4/msf_orchestrator.py`: Langgraph-based task execution.
-*   `msf_aiv4/tools/`: Category-specific tool implementations.
+Le projet suit une architecture modulaire MVC (Modèle-Vue-Contrôleur) :
+*   **Modèle** (`msf_model.py`) : Gestion complète de la connexion RPC Metasploit.
+*   **Vue** (`msf_view.py`) : Interface terminal dynamique avec prompts contextuels.
+*   **Contrôleur** (`msf_controller.py`) : Coordinateur de logique, gestion de l'historique et des outils.
+*   **Orchestrateur** (`msf_orchestrator.py`) : Moteur d'exécution basé sur **Langgraph** (Planner -> Executor -> Analyzer).
 
-## Installation
+### Modularité des Outils
+Les outils sont répartis par catégories dans `msf_aiv4/tools/` :
+*   **Réseau** : CIDR, géolocalisation, scan de ports parallèle, port knocking.
+*   **Web** : Analyse de formulaires (BeautifulSoup), détection WAF, injection SQL, en-têtes de sécurité.
+*   **Reconnaissance** : WHOIS réel, énumération DNS, découverte de sous-domaines (crt.sh).
+*   **Post-Exploitation** : Collecte d'infos système, recherche de fichiers, extraction d'identifiants.
+*   **OS** : Identification et interaction avec Linux, WSL et Windows.
 
-1.  **Clone the repository:**
+## 🚀 Fonctionnalités Clés
+
+*   **Orchestration Langgraph** : Planification dynamique et adaptative des tâches.
+*   **Système RAG (Retrieval-Augmented Generation)** : Base de connaissances SQLite pour enrichir les réponses de l'IA avec des exploits réels et des bonnes pratiques.
+*   **Gestion de Sécurité Intégrée** : Modes "safe" (lecture seule/info) et "unsafe" (exécution totale) configurables.
+*   **Audit Logging** : Journalisation détaillée de toutes les actions offensives au format JSON (`audit.json`).
+*   **Performance** : Scans de ports parallèles et mise en cache des résultats (WHOIS, DNS).
+
+## ⚙️ Installation et Configuration
+
+1.  **Prérequis** :
+    *   Python 3.10+
+    *   Metasploit Framework (avec `msfrpcd` actif)
+
+2.  **Installation** :
     ```bash
     git clone <repository-url>
     cd msf-ai-assistant
-    ```
-
-2.  **Install dependencies:**
-    ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Configure Environment:**
-    Create a `.env` file in the root directory and add your API keys:
+3.  **Configuration** :
+    Copiez `.env.example` en `.env` et remplissez vos clés :
     ```env
-    DEEPSEEK_API_KEY=your_api_key_here
-    MSF_RPC_PASS=your_msf_password
+    DEEPSEEK_API_KEY=votre_cle_ici
+    MSF_RPC_PASS=votre_mot_de_passe
     ```
 
-4.  **Launch Metasploit RPC:**
-    Ensure `msfrpcd` is running before starting the assistant.
+4.  **Lancement** :
+    ```bash
+    python3 msf_mvc.py
+    ```
 
-## Usage
+## 📖 Utilisation
 
-Run the assistant:
+| Commande | Description |
+|----------|-------------|
+| `help` | Affiche le menu d'aide |
+| `sessions` | Liste les sessions Metasploit actives |
+| `config` | Affiche la configuration actuelle |
+| `security <mode>` | Change le mode (safe/unsafe) |
+| `set RHOSTS <ip>` | Définit une variable de contexte |
+| `clear` | Efface l'écran |
+| `exit` | Quitte l'application |
+
+## 🧪 Tests
+
+Lancez la suite de tests avec pytest :
 ```bash
-python3 msf_mvc.py
+pytest tests/
 ```
 
-### Security Modes
-You can toggle between security modes by asking the AI or editing `config.json`:
-*   `safe`: Restricted command execution (informational only).
-*   `unsafe`: Full command execution capabilities.
-
-## Requirements
-
-*   Python 3.10+
-*   Metasploit Framework
-*   Internet access for API and RAG lookups
+---
+**Développé avec une approche "Security by Design". Usage en environnement LAB uniquement.**

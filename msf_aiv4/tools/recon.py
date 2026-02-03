@@ -6,7 +6,9 @@ import requests
 import whois
 import dns.resolver
 from typing import Dict, Any, List
+from msf_aiv4.tools.cache import cache_result
 
+@cache_result(expiry_seconds=86400) # Cache 24h
 def whois_lookup(domain: str) -> str:
     """Effectue une recherche WHOIS en utilisant python-whois."""
     try:
@@ -15,6 +17,7 @@ def whois_lookup(domain: str) -> str:
     except Exception as e:
         return f"Erreur : {e}"
 
+@cache_result(expiry_seconds=3600) # Cache 1h
 def dns_enumeration(domain: str) -> Dict[str, List[str]]:
     """Récupère les enregistrements DNS en utilisant dnspython."""
     records = {}
@@ -54,7 +57,7 @@ def reverse_ip_lookup(ip: str) -> List[str]:
         return r.text.splitlines()
     except:
         return ["Erreur lors de la recherche"]
-        
+
 def check_email_breach(email: str) -> str:
     """Espace réservé pour la vérification de fuite d'e-mail."""
     return f"La vérification de fuite pour {email} nécessite une clé API externe (ex: HaveIBeenPwned)."

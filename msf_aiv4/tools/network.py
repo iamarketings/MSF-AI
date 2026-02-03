@@ -6,6 +6,7 @@ import ipaddress
 import requests
 import json
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List
 
 def expand_cidr(cidr: str) -> List[str]:
@@ -77,12 +78,25 @@ def check_port_open(target: str, port: int) -> bool:
     """Vérifie si un port TCP est ouvert."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
+        sock.settimeout(1)
         result = sock.connect_ex((target, int(port)))
         sock.close()
         return result == 0
     except:
         return False
+
+def parallel_port_scan(target: str, ports: List[int]) -> Dict[str, bool]:
+    """Effectue un scan de ports parallèle pour plus d'efficacité."""
+    results = {}
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(check_port_open, target, port): port for port in ports}
+        for future in as_completed(futures):
+            port = futures[future]
+            try:
+                results[str(port)] = future.result()
+            except:
+                results[str(port)] = False
+    return results
 
 def get_tools() -> Dict[str, Any]:
     """Retourne les définitions des outils pour ce module."""
@@ -93,5 +107,6 @@ def get_tools() -> Dict[str, Any]:
         "parse_nmap_xml": parse_nmap_xml,
         "port_knock": port_knock,
         "reverse_dns": reverse_dns,
-        "check_port_open": check_port_open
+        "check_port_open": check_port_open,
+        "parallel_port_scan": parallel_port_scan
     }

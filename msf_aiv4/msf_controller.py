@@ -29,15 +29,25 @@ logging.basicConfig(
 logger = logging.getLogger('MSF_AI.Controller')
 
 class AuditLogger:
-    """Gère l'audit de toutes les actions effectuées par l'assistant."""
-    def __init__(self, log_file="audit.log"):
+    """Gère l'audit détaillé de toutes les actions offensives en format JSON."""
+    def __init__(self, log_file="audit.json"):
         self.log_file = log_file
 
-    def log_action(self, action, target, result, user="system"):
+    def log_action(self, action, target, params, result, status="pending", user="system"):
         import time
+        import json
+        entry = {
+            "timestamp": time.time(),
+            "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "user": user,
+            "action": action,
+            "target": target,
+            "params": params,
+            "result": str(result)[:500] if result else None,
+            "status": status
+        }
         with open(self.log_file, "a") as f:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"{timestamp},{user},{action},{target},{result}\n")
+            f.write(json.dumps(entry) + "\n")
 
 class MSFAIController:
     """
@@ -388,19 +398,20 @@ class MSFAIController:
 
                     elif func_name in self.tools_map:
                         print_status(f"Exécution outil: {func_name}", "exec")
+                        target = args.get('target', args.get('rhosts', args.get('url', 'N/A')))
                         try:
-                            # Audit log
-                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), "pending")
+                            # Audit log initial
+                            self.audit.log_action(func_name, target, args, None, "pending")
 
                             # Appel de l'outil
                             res = self.tools_map[func_name](**args)
                             self.conversation.add_tool_result(tc.id, str(res))
 
-                            # Update audit
-                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), "success")
+                            # Mise à jour audit final
+                            self.audit.log_action(func_name, target, args, res, "success")
                         except Exception as e:
                             self.conversation.add_tool_result(tc.id, f"Erreur: {e}")
-                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), f"error: {e}")
+                            self.audit.log_action(func_name, target, args, str(e), "error")
                     else:
                          self.conversation.add_tool_result(tc.id, "Outil non trouvé ou non activé directement.")
 
