@@ -28,12 +28,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger('MSF_AI.Controller')
 
+class AuditLogger:
+    """Gère l'audit de toutes les actions effectuées par l'assistant."""
+    def __init__(self, log_file="audit.log"):
+        self.log_file = log_file
+
+    def log_action(self, action, target, result, user="system"):
+        import time
+        with open(self.log_file, "a") as f:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{timestamp},{user},{action},{target},{result}\n")
+
 class MSFAIController:
     """
     Contrôleur responsable de la coordination entre l'Utilisateur, l'IA et Metasploit.
     """
     def __init__(self):
-        load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+        # Chercher le fichier .env dans le répertoire racine
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
         self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
         self.config = self._load_config()
 
@@ -57,6 +69,7 @@ class MSFAIController:
 
         # État
         self.conversation = ConversationHistory()
+        self.audit = AuditLogger()
 
     def _load_config(self) -> Dict[str, Any]:
         """Charge la configuration depuis le fichier JSON."""
@@ -264,6 +277,7 @@ class MSFAIController:
     def process_input(self, user_input: str):
         """Itération de la boucle principale de traitement."""
         user_input = user_input.strip()
+        # On n'accepte plus d'entrée vide pour éviter les boucles infinies de l'IA
         if not user_input:
             return
 
@@ -375,17 +389,23 @@ class MSFAIController:
                     elif func_name in self.tools_map:
                         print_status(f"Exécution outil: {func_name}", "exec")
                         try:
+                            # Audit log
+                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), "pending")
+
                             # Appel de l'outil
                             res = self.tools_map[func_name](**args)
                             self.conversation.add_tool_result(tc.id, str(res))
+
+                            # Update audit
+                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), "success")
                         except Exception as e:
                             self.conversation.add_tool_result(tc.id, f"Erreur: {e}")
+                            self.audit.log_action(func_name, args.get('target', args.get('rhosts', 'N/A')), f"error: {e}")
                     else:
                          self.conversation.add_tool_result(tc.id, "Outil non trouvé ou non activé directement.")
 
-                # Appel récursif pour obtenir la réponse finale après les sorties d'outils
-                self.process_input("") # Déclenche la ré-évaluation avec l'historique
-                return
+                # On finalise l'exécution sans récursion pour éviter les boucles infinies
+                return self._finalize_tool_execution()
 
             # 6. Réponse finale
             if content:
@@ -394,6 +414,22 @@ class MSFAIController:
 
         except Exception as e:
             print_status(f"Erreur traitement: {e}", "error")
+
+    def _finalize_tool_execution(self):
+        """Obtient la réponse finale de l'IA après l'exécution d'un ou plusieurs outils."""
+        print_thinking(True)
+        try:
+            response = self.ai_client.chat.completions.create(
+                model=self.api_model,
+                messages=self.conversation.get_messages(),
+                temperature=0.3
+            )
+            content = response.choices[0].message.content
+            if content:
+                self.conversation.add_message("assistant", content)
+                self.view.display_response(content)
+        except Exception as e:
+            print_status(f"Erreur lors de la finalisation : {e}", "error")
 
 class ConversationHistory:
     """Gère l'historique de la conversation."""

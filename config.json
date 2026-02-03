@@ -1,5 +1,9 @@
 {
     "security_mode": "safe",
     "api_model": "deepseek-chat",
-    "msf_rpc_port": 55553
+    "msf_rpc_port": 55553,
+    "require_explicit_consent": true,
+    "log_all_actions": true,
+    "allowed_targets": ["127.0.0.1", "192.168.1.0/24"],
+    "forbidden_commands": ["rm -rf", "format", "del /f", "chmod", "chown"]
 }

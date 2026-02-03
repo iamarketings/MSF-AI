@@ -1,6 +1,13 @@
 # Metasploit Framework AI Assistant (MSF-AI v4)
 
-This project is an AI-powered assistant for the Metasploit Framework. It provides a conversational interface to interact with Metasploit and perform various penetration testing tasks autonomously using advanced orchestration.
+> [!CAUTION]
+> ## 🔴 Sécurité et Responsabilité Légale
+> Ce projet automatise des capacités offensives qui peuvent causer des dommages significatifs.
+> - **L'utilisation non autorisée sur des systèmes tiers est illégale.**
+> - Ce logiciel est destiné uniquement à des fins éducatives et de tests d'intrusion autorisés dans des environnements contrôlés (LAB).
+> - Les auteurs déclinent toute responsabilité en cas de mauvaise utilisation ou de dommages causés par cet outil.
+
+Ce projet est un assistant propulsé par l'IA pour le Metasploit Framework. Il offre une interface conversationnelle pour interagir avec Metasploit et effectuer diverses tâches de test d'intrusion de manière autonome grâce à une orchestration avancée.
 
 ## Features
 

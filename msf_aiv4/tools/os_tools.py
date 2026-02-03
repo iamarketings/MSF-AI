@@ -36,15 +36,22 @@ def identify_session_os(client, session_id: int) -> str:
         return f"Erreur : {e}"
 
 def execute_linux_command(command: str) -> str:
-    """Exécute une commande sur un système Linux/WSL. Refuse les commandes dangereuses en mode 'safe'."""
+    """Exécute une commande sur un système Linux/WSL. Refuse les commandes dangereuses."""
     if platform.system() != "Linux":
         return "Erreur : Cet outil est uniquement disponible sur Linux/WSL."
 
-    # Vérification de sécurité
+    cmd_clean = command.strip().lower()
+
+    # Vérification des commandes interdites (toujours active)
+    forbidden = config.get("forbidden_commands", [])
+    if any(f in cmd_clean for f in forbidden):
+        return f"Blocage de sécurité critique : La commande contient un élément interdit ({forbidden})."
+
+    # Vérification du mode safe
     if config.get("security_mode") == "safe":
         # Autoriser uniquement un ensemble très limité de commandes informationnelles
         allowed_prefixes = ["ls", "whoami", "id", "uname", "df", "free", "uptime", "cat /etc/os-release"]
-        is_allowed = any(command.strip().startswith(prefix) for prefix in allowed_prefixes)
+        is_allowed = any(cmd_clean.startswith(prefix) for prefix in allowed_prefixes)
         if not is_allowed:
             return f"Blocage de sécurité : La commande '{command}' n'est pas autorisée en mode 'safe'. Passez en mode 'unsafe' pour exécuter des commandes arbitraires."
 
@@ -56,14 +63,21 @@ def execute_linux_command(command: str) -> str:
         return f"Erreur : {e}"
 
 def execute_windows_command(command: str) -> str:
-    """Exécute une commande sur un système Windows. Refuse les commandes dangereuses en mode 'safe'."""
+    """Exécute une commande sur un système Windows. Refuse les commandes dangereuses."""
     if platform.system() != "Windows":
         return "Erreur : Cet outil est uniquement disponible sur Windows."
 
-    # Vérification de sécurité
+    cmd_clean = command.strip().lower()
+
+    # Vérification des commandes interdites (toujours active)
+    forbidden = config.get("forbidden_commands", [])
+    if any(f in cmd_clean for f in forbidden):
+        return f"Blocage de sécurité critique : La commande contient un élément interdit ({forbidden})."
+
+    # Vérification du mode safe
     if config.get("security_mode") == "safe":
         allowed_prefixes = ["dir", "whoami", "hostname", "ver", "systeminfo", "get-process"]
-        is_allowed = any(command.strip().lower().startswith(prefix) for prefix in allowed_prefixes)
+        is_allowed = any(cmd_clean.startswith(prefix) for prefix in allowed_prefixes)
         if not is_allowed:
             return f"Blocage de sécurité : La commande '{command}' n'est pas autorisée en mode 'safe'."
 

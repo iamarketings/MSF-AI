@@ -100,8 +100,13 @@ class MSFRagLibrary:
             logger.error(f"Échec de l'initialisation de la base de données : {e}")
             raise
 
+    def _sanitize_query(self, query: str) -> str:
+        """Assainit la requête pour éviter les injections SQL simples."""
+        return query.replace("'", "''").replace(";", "")
+
     def retrieve_context(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Récupère le contexte pertinent basé sur la requête."""
+        query = self._sanitize_query(query)
         try:
             # Rechercher dans les exploits
             exploit_results = self.db.execute("""
@@ -145,6 +150,9 @@ class MSFRagLibrary:
 
     def retrieve_vulnerabilities(self, product: str, version: str = None) -> List[Dict[str, Any]]:
         """Récupère les signatures de vulnérabilité basées sur le produit et la version."""
+        product = self._sanitize_query(product)
+        if version:
+            version = self._sanitize_query(version)
         try:
             query = "SELECT * FROM vulnerability_signatures WHERE product LIKE ?"
             params = [f"%{product}%"]

@@ -3,10 +3,29 @@ Outils d'Automatisation Web pour MSF-AI v4
 """
 import requests
 import re
+import time
+from functools import wraps
 from typing import Dict, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
+def rate_limit(calls_per_minute=10):
+    """Limiteur de débit pour les appels d'outils web."""
+    def decorator(func):
+        last_called = []
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            # Nettoyer les appels datant de plus de 60s
+            last_called[:] = [t for t in last_called if now - t < 60]
+            if len(last_called) >= calls_per_minute:
+                return f"Erreur : Rate limit dépassé ({calls_per_minute} appels/min). Veuillez patienter."
+            last_called.append(now)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+@rate_limit(calls_per_minute=5)
 def screenshot_url(url: str, output: str = "screenshot.png") -> str:
     """Prend une capture d'écran d'une URL (nécessite wkhtmltoimage)."""
     import subprocess
@@ -17,6 +36,7 @@ def screenshot_url(url: str, output: str = "screenshot.png") -> str:
     except Exception as e:
         return f"Erreur lors de la capture d'écran : {e}"
 
+@rate_limit(calls_per_minute=20)
 def get_http_headers(url: str) -> Dict[str, str]:
     """Récupère les en-têtes HTTP pour une URL."""
     try:
@@ -26,6 +46,7 @@ def get_http_headers(url: str) -> Dict[str, str]:
     except Exception as e:
         return {"error": str(e)}
 
+@rate_limit(calls_per_minute=10)
 def extract_forms(url: str) -> List[Dict[str, Any]]:
     """Extrait les formulaires HTML d'une page en utilisant BeautifulSoup."""
     try:
@@ -53,6 +74,7 @@ def extract_forms(url: str) -> List[Dict[str, Any]]:
     except Exception as e:
         return [{"error": str(e)}]
 
+@rate_limit(calls_per_minute=20)
 def check_security_headers(url: str) -> Dict[str, str]:
     """Vérifie la présence d'en-têtes de sécurité courants."""
     try:
@@ -74,6 +96,7 @@ def check_security_headers(url: str) -> Dict[str, str]:
     except Exception as e:
         return {"error": str(e)}
 
+@rate_limit(calls_per_minute=15)
 def check_waf(url: str) -> str:
     """Détection basique de WAF en envoyant une charge utile suspecte."""
     try:
@@ -89,6 +112,7 @@ def check_waf(url: str) -> str:
     except Exception as e:
         return f"Erreur : {e}"
 
+@rate_limit(calls_per_minute=5)
 def enumerate_directories(url: str, wordlist: List[str] = ["admin", "login", "backup", "db", "test"]) -> List[str]:
     """Brute-force simple de répertoires."""
     found = []
@@ -105,6 +129,7 @@ def enumerate_directories(url: str, wordlist: List[str] = ["admin", "login", "ba
             pass
     return found
 
+@rate_limit(calls_per_minute=10)
 def sql_injection_test(url: str, param: str) -> str:
     """Test basique d'injection SQL sur un paramètre."""
     try:

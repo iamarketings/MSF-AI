@@ -2,7 +2,10 @@
 Modèle MSF - Gère la connexion RPC Metasploit
 """
 import ssl
+import logging
 from pymetasploit3.msfrpc import MsfRpcClient
+
+logger = logging.getLogger('MSF_AI.Model')
 
 class MSFModel:
     def __init__(self, password, user="msf", port=55553, host="127.0.0.1"):
@@ -33,6 +36,7 @@ class MSFModel:
             self.cid = self.client.consoles.console().cid
             return True
         except Exception as e:
+            logger.error(f"Échec de connexion MSF RPC : {e}")
             return False
 
     def search_modules(self, query: str) -> str:

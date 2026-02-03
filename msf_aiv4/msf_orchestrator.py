@@ -98,6 +98,26 @@ class LanggraphOrchestrator:
             logger.error(f"Échec de planification : {e}")
             return {"error": f"Erreur de planification : {e}", "finished": True}
 
+    def _validate_context_value(self, key: str, value: Any) -> bool:
+        """Valide les valeurs du contexte pour éviter les injections ou erreurs de type."""
+        if not value: return False
+        str_val = str(value)
+
+        # Validation IP/Hôte
+        if key in ['RHOSTS', 'LHOST', 'target', 'host', 'ip']:
+            # Validation basique IP ou domaine
+            return bool(re.match(r'^[\w\.-]+$', str_val))
+
+        # Validation Port
+        if key in ['RPORT', 'LPORT', 'port']:
+            try:
+                port = int(str_val)
+                return 0 < port < 65536
+            except:
+                return False
+
+        return True
+
     def _executor_node(self, state: AgentState):
         """Exécute l'étape suivante du plan."""
         if state['current_step_index'] >= len(state['plan']):
@@ -122,9 +142,11 @@ class LanggraphOrchestrator:
         }
         for ctx_key, arg_keys in context_mapping.items():
             if ctx_key in state['context']:
-                for arg_key in arg_keys:
-                    if arg_key in args and not args[arg_key]:
-                         args[arg_key] = state['context'][ctx_key]
+                value = state['context'][ctx_key]
+                if self._validate_context_value(ctx_key, value):
+                    for arg_key in arg_keys:
+                        if arg_key in args and not args[arg_key]:
+                             args[arg_key] = value
 
         print(f"[*] Exécution : {step['description']}")
 
