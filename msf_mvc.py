@@ -1,31 +1,40 @@
 #!/usr/bin/env python3
 """
-MSF-AI v4 MVC Entry Point
+MSF-AI v4 - Point d'entrée MVC
 """
 import os
 import sys
 
-# Ensure package is in path
+# S'assurer que le package est dans le chemin (path)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from msf_aiv4.msf_controller import MSFAIController, setup_readline, save_history
 
 def main():
-    # Setup readline for better input experience if possible
+    # Configuration de readline pour une meilleure expérience de saisie
     setup_readline()
     
-    # Init Controller
+    # Initialisation du Contrôleur
     controller = MSFAIController()
     
-    # Show UI immediately
+    # Affichage immédiat de la bannière
     controller.view.show_banner()
     
-    # Start System
+    # Démarrage du système
     if controller.initialize():
-        # Main Loop
+        # Boucle principale
         while True:
             try:
-                user_input = controller.view.get_input()
+                # Récupération des données dynamiques pour l'invite (prompt)
+                security = controller.config.get("security_mode", "safe").upper()
+                sessions = controller.msf.list_sessions()
+                session_count = len(sessions) if sessions else 0
+                session_label = f"{session_count} SESSION(S)" if session_count > 0 else "NO SESSION"
+
+                # Récupération de la cible actuelle depuis le contexte de l'orchestrateur
+                target = controller.orchestrator.context.get('RHOSTS')
+
+                user_input = controller.view.get_input(session=session_label, security=security, target=target)
                 controller.process_input(user_input)
             except KeyboardInterrupt:
                 print("\n\n[!] Arrêt demandé par l'utilisateur...")

@@ -1,5 +1,5 @@
 """
-MSF Model - Handles Metasploit RPC Connection
+Modèle MSF - Gère la connexion RPC Metasploit
 """
 import ssl
 from pymetasploit3.msfrpc import MsfRpcClient
@@ -14,9 +14,9 @@ class MSFModel:
         self.cid = None
         
     def connect(self) -> bool:
-        """Connects to the MSF RPC service."""
+        """Se connecte au service RPC MSF."""
         try:
-            # Create a custom SSL context that ignores verification
+            # Créer un contexte SSL personnalisé qui ignore la vérification (souvent nécessaire pour MSF RPC)
             ssl_ctx = ssl.create_default_context()
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -28,35 +28,33 @@ class MSFModel:
                 server=self.host,
                 ssl=False
             )
-            # SSL is disabled in start_mcp.sh via -S flag, so we must match it here.
+            # Le SSL est souvent désactivé dans les scripts de démarrage via le drapeau -S
             
             self.cid = self.client.consoles.console().cid
             return True
         except Exception as e:
-            # print(f"Connection failed: {e}") # Let controller handle logging
             return False
 
     def search_modules(self, query: str) -> str:
-        """Searches for modules."""
-        if not self.client: return "Not connected"
+        """Recherche des modules."""
+        if not self.client: return "Non connecté"
         res = self.client.modules.search(query)
-        if not res: return "No modules found."
-        # Limit output
+        if not res: return "Aucun module trouvé."
+        # Limiter la sortie
         return str(res[:10])
 
     def get_module_info(self, module_path: str) -> str:
-        """Gets info about a module."""
+        """Récupère les informations d'un module."""
         try:
-            # Check type
             mtype = module_path.split('/')[0]
             mname = '/'.join(module_path.split('/')[1:])
             mod = self.client.modules.use(mtype, mname)
             return mod.description
         except Exception as e:
-            return f"Error: {e}"
+            return f"Erreur : {e}"
 
     def get_module_options(self, module_path: str) -> dict:
-        """Gets options for a module."""
+        """Récupère les options d'un module."""
         try:
             mtype = module_path.split('/')[0]
             mname = '/'.join(module_path.split('/')[1:])
@@ -66,12 +64,12 @@ class MSFModel:
             return {}
 
     def check_vulnerability(self, module_path: str, options: dict) -> str:
-        """Runs check method."""
+        """Exécute la méthode 'check' d'un module."""
         try:
             mtype = module_path.split('/')[0]
             mname = '/'.join(module_path.split('/')[1:])
             mod = self.client.modules.use(mtype, mname)
-            # Set options
+            # Définir les options
             for k,v in options.items():
                 if k in mod.options:
                     mod[k] = v
@@ -79,32 +77,34 @@ class MSFModel:
             res = mod.check()
             return str(res)
         except Exception as e:
-            return f"Check error: {e}"
+            return f"Erreur de vérification : {e}"
 
     def run_exploit(self, module_path: str, options: dict) -> str:
-        """Runs exploit."""
+        """Exécute un exploit."""
         try:
             mtype = module_path.split('/')[0]
             mname = '/'.join(module_path.split('/')[1:])
             mod = self.client.modules.use(mtype, mname)
-             # Set options
+             # Définir les options
             for k,v in options.items():
                 if k in mod.options:
                     mod[k] = v
             
             job_id = mod.execute(payload=options.get('PAYLOAD', 'cmd/unix/reverse'))
-            return f"Exploit launched. Job ID: {job_id}"
+            return f"Exploit lancé. ID de tâche (Job ID) : {job_id}"
         except Exception as e:
-            return f"Exploit error: {e}"
+            return f"Erreur d'exploitation : {e}"
 
     def list_sessions(self) -> dict:
+        """Liste les sessions actives."""
         if not self.client: return {}
         return self.client.sessions.list
 
     def session_execute(self, session_id: str, command: str) -> str:
+        """Exécute une commande dans une session."""
         try:
             shell = self.client.sessions.session(str(session_id))
             shell.write(command)
-            return f"Command '{command}' sent to session {session_id}"
+            return f"Commande '{command}' envoyée à la session {session_id}"
         except Exception as e:
-            return f"Session error: {e}"
+            return f"Erreur de session : {e}"

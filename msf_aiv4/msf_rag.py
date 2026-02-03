@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MSF AI v4 - RAG System (Retrieval-Augmented Generation)
-Knowledge base for Metasploit modules and exploitation techniques
+MSF AI v4 - Système RAG (Retrieval-Augmented Generation)
+Base de connaissances pour les modules Metasploit et les techniques d'exploitation.
 """
 import sqlite3
 import json
@@ -13,8 +13,8 @@ logger = logging.getLogger('MSF_AI.RAG')
 
 class MSFRagLibrary:
     """
-    SQLite-based RAG library for Metasploit knowledge
-    Contains information about modules, CVE, vulnerabilities, and best practices
+    Bibliothèque RAG basée sur SQLite pour la connaissance Metasploit.
+    Contient des informations sur les modules, CVE, vulnérabilités et bonnes pratiques.
     """
     
     def __init__(self, db_path: str = "msf_knowledge.db"):
@@ -24,19 +24,19 @@ class MSFRagLibrary:
         self.init_db()
     
     def connect(self):
-        """Establishes database connection"""
+        """Établit la connexion à la base de données."""
         try:
             self.db = sqlite3.connect(str(self.db_path))
-            self.db.row_factory = sqlite3.Row  # Allow dict-like access to rows
-            logger.info(f"Connected to RAG database: {self.db_path}")
+            self.db.row_factory = sqlite3.Row  # Permet l'accès aux lignes comme des dictionnaires
+            logger.info(f"Connecté à la base de données RAG : {self.db_path}")
         except Exception as e:
-            logger.error(f"Failed to connect to RAG database: {e}")
+            logger.error(f"Échec de la connexion à la base de données RAG : {e}")
             raise
     
     def init_db(self):
-        """Initializes the database schema"""
+        """Initialise le schéma de la base de données."""
         try:
-            # Create exploits table
+            # Créer la table des exploits
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS exploits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +52,7 @@ class MSFRagLibrary:
                 )
             """)
             
-            # Create vulnerability signatures table
+            # Créer la table des signatures de vulnérabilité
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS vulnerability_signatures (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +68,7 @@ class MSFRagLibrary:
                 )
             """)
             
-            # Create prompt templates table
+            # Créer la table des modèles de prompt (prompt templates)
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS prompt_templates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +79,7 @@ class MSFRagLibrary:
                 )
             """)
             
-            # Create villager knowledge table
+            # Créer la table de connaissances 'villager'
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS villager_knowledge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,7 @@ class MSFRagLibrary:
                 )
             """)
             
-            # Create indexes
+            # Créer les index
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_exploits_tags ON exploits(tags)")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_exploits_cve ON exploits(cve)")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_vuln_cve ON vulnerability_signatures(cve)")
@@ -97,20 +97,20 @@ class MSFRagLibrary:
             
             self.db.commit()
         except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
+            logger.error(f"Échec de l'initialisation de la base de données : {e}")
             raise
 
     def retrieve_context(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Retrieves relevant context based on query"""
+        """Récupère le contexte pertinent basé sur la requête."""
         try:
-            # Search exploits
+            # Rechercher dans les exploits
             exploit_results = self.db.execute("""
                 SELECT * FROM exploits 
                 WHERE description LIKE ? OR tags LIKE ? 
                 LIMIT ?
             """, (f"%{query}%", f"%{query}%", limit)).fetchall()
             
-            # Search villager knowledge
+            # Rechercher dans les connaissances villager
             villager_results = self.db.execute("""
                 SELECT * FROM villager_knowledge
                 WHERE title LIKE ? OR content LIKE ?
@@ -125,7 +125,9 @@ class MSFRagLibrary:
                     "module_path": result["module_path"],
                     "description": result["description"],
                     "tags": result["tags"],
-                    "source": "MSF Module Database"
+                    "success_rate": result["success_rate"],
+                    "best_practices": result["best_practices"],
+                    "source": "Base de données des modules MSF"
                 })
                 
             for result in villager_results:
@@ -133,31 +135,53 @@ class MSFRagLibrary:
                     "type": "knowledge_entry",
                     "description": result["title"], 
                     "template": result["content"][:500] + "...", 
-                    "source": "Villager Knowledge Base"
+                    "source": "Base de connaissances Villager"
                 })
             
             return context
         except Exception as e:
-            logger.error(f"Failed to retrieve context: {e}")
+            logger.error(f"Échec de la récupération du contexte : {e}")
+            return []
+
+    def retrieve_vulnerabilities(self, product: str, version: str = None) -> List[Dict[str, Any]]:
+        """Récupère les signatures de vulnérabilité basées sur le produit et la version."""
+        try:
+            query = "SELECT * FROM vulnerability_signatures WHERE product LIKE ?"
+            params = [f"%{product}%"]
+            if version:
+                query += " AND version LIKE ?"
+                params.append(f"%{version}%")
+
+            results = self.db.execute(query, params).fetchall()
+            return [dict(r) for r in results]
+        except Exception as e:
+            logger.error(f"Échec de la récupération des vulnérabilités : {e}")
             return []
 
     def enhance_prompt(self, user_query: str, context_limit: int = 5) -> str:
-        """Enhances user query with RAG context."""
+        """Améliore la requête utilisateur avec le contexte RAG."""
         context = self.retrieve_context(user_query, context_limit)
         if not context:
             return user_query
             
         context_str = "\n[CONTEXTE RAG DÉTECTÉ]\n"
         for item in context:
-            context_str += f"- [{item['type']}] {item['description']}\n"
-            if 'template' in item:
-                context_str += f"  Content: {item['template']}\n"
+            if item['type'] == 'exploit':
+                context_str += f"- [Exploit] {item['module_path']}: {item['description']}\n"
+                context_str += f"  Taux de succès : {item.get('success_rate', 'N/A')}\n"
+                context_str += f"  Bonnes pratiques : {item.get('best_practices', 'Aucune')}\n"
+            else:
+                context_str += f"- [{item['type']}] {item['description']}\n"
+                if 'template' in item:
+                    context_str += f"  Contenu : {item['template']}\n"
                 
-        return f"{context_str}\n\nRequête User: {user_query}"
+        return f"{context_str}\n\nRequête Utilisateur : {user_query}"
         
     def close(self):
+        """Ferme la connexion à la base de données."""
         if self.db:
             self.db.close()
 
 def create_rag_library() -> MSFRagLibrary:
+    """Fonction utilitaire pour créer la bibliothèque RAG."""
     return MSFRagLibrary()
