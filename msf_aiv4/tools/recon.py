@@ -3,23 +3,29 @@ Reconnaissance Tools for MSF-AI v4
 """
 import socket
 import requests
+import whois
+import dns.resolver
 from typing import Dict, Any, List
 
 def whois_lookup(domain: str) -> str:
-    """Simulates WHOIS lookup."""
+    """Performs WHOIS lookup using python-whois."""
     try:
-        # Real impl would use python-whois
-        return f"WHOIS data for {domain} (Simulated): Registrar=Example, expiry=2030"
+        w = whois.whois(domain)
+        return str(w)
     except Exception as e:
         return f"Error: {e}"
 
 def dns_enumeration(domain: str) -> Dict[str, List[str]]:
-    """Basic DNS records fetch."""
+    """DNS records fetch using dnspython."""
     records = {}
-    for rtype in ['A', 'MX', 'TXT', 'NS']:
-        # Simulating DNS fetch or using simple socket calls where possible
-        # Real DNS enum needs dnspython
-        records[rtype] = ["Simulated record"]
+    for rtype in ['A', 'AAAA', 'MX', 'TXT', 'NS', 'SOA']:
+        try:
+            answers = dns.resolver.resolve(domain, rtype)
+            records[rtype] = [str(rdata) for rdata in answers]
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
+            records[rtype] = []
+        except Exception as e:
+            records[rtype] = [f"Error: {e}"]
     return records
 
 def subdomain_discovery(domain: str) -> List[str]:
@@ -50,7 +56,8 @@ def reverse_ip_lookup(ip: str) -> List[str]:
         return ["Error in lookup"]
         
 def check_email_breach(email: str) -> str:
-    return "Breach check requires API key."
+    """Placeholder for email breach check."""
+    return f"Breach check for {email} requires an external API key (e.g., HaveIBeenPwned)."
 
 def get_tools() -> Dict[str, Any]:
     return {

@@ -1,2 +1,6 @@
 .env
-
+__pycache__/
+*.pyc
+msf_ai.log
+*.db
+.pytest_cache/

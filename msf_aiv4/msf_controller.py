@@ -17,8 +17,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from msf_aiv4.msf_model import MSFModel
 from msf_aiv4.msf_view import MSFView, print_status, print_thinking
 from msf_aiv4.msf_rag import create_rag_library
-from msf_aiv4.msf_orchestrator import TaskOrchestrator
-from msf_aiv4.tools import network, web, postexp, reporting, recon
+from msf_aiv4.msf_orchestrator import LanggraphOrchestrator
+from msf_aiv4.tools import network, web, postexp, reporting, recon, os_tools
 
 # Logger setup
 logging.basicConfig(
@@ -34,12 +34,14 @@ class MSFAIController:
     """
     def __init__(self):
         load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+        self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        self.config = self._load_config()
         
         # Config
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         self.msf_pass = os.getenv("MSF_RPC_PASS")
         self.msf_user = os.getenv("MSF_RPC_USER", "msf") 
-        self.msf_port = int(os.getenv("MSF_RPC_PORT", 55553))
+        self.msf_port = self.config.get("msf_rpc_port", int(os.getenv("MSF_RPC_PORT", 55553)))
         
         # Components
         self.msf = MSFModel(self.msf_pass, port=self.msf_port, user=self.msf_user)
@@ -47,7 +49,7 @@ class MSFAIController:
         self.rag = None
         self.orchestrator = None
         self.ai_client = None
-        self.api_model = "deepseek-chat"
+        self.api_model = self.config.get("api_model", "deepseek-chat")
         
         # Tools
         self.tools_map = {}
@@ -55,7 +57,24 @@ class MSFAIController:
         
         # State
         self.conversation = ConversationHistory()
-        self.config = {"security_mode": "safe"}
+
+    def _load_config(self) -> Dict[str, Any]:
+        if os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                return json.load(f)
+        return {"security_mode": "safe", "api_model": "deepseek-chat", "msf_rpc_port": 55553}
+
+    def _save_config(self):
+        with open(self.config_path, 'w') as f:
+            json.dump(self.config, f, indent=4)
+
+    def set_security_mode(self, mode: str) -> str:
+        """Sets the security mode (safe or unsafe)."""
+        if mode.lower() in ["safe", "unsafe"]:
+            self.config["security_mode"] = mode.lower()
+            self._save_config()
+            return f"Security mode set to {mode}"
+        return "Invalid mode. Use 'safe' or 'unsafe'."
 
     def initialize(self) -> bool:
         """Initializes all subsystems."""
@@ -92,7 +111,7 @@ class MSFAIController:
         self._build_tools_def()
         
         # 5. Init Orchestrator
-        self.orchestrator = TaskOrchestrator(self.ai_client, self.config, self.tools_map, self.api_model)
+        self.orchestrator = LanggraphOrchestrator(self.ai_client, self.config, self.tools_map, self.api_model)
         
         return True
         
@@ -106,7 +125,8 @@ class MSFAIController:
             "check_vulnerability": self.msf.check_vulnerability,
             "run_exploit": self.msf.run_exploit,
             "list_sessions": self.msf.list_sessions,
-            "session_execute": self.msf.session_execute
+            "session_execute": self.msf.session_execute,
+            "set_security_mode": self.set_security_mode
         })
         
         # Network Tools
@@ -120,10 +140,16 @@ class MSFAIController:
         
         # Recon Tools
         self.tools_map.update(recon.get_tools())
+
+        # OS Tools
+        os_tools.set_config(self.config)
+        self.tools_map.update(os_tools.get_tools())
         
         # Post-Exp Tools (Wrap with client/session injection)
         post_tools = postexp.get_tools()
-        for name, func in post_tools.items():
+        # Combine with OS tools that need client
+        client_tools = {**post_tools, "identify_session_os": os_tools.identify_session_os}
+        for name, func in client_tools.items():
             # We create a closure to capture the correct function
             def create_wrapper(f):
                 return lambda **kwargs: f(self.msf.client, **kwargs)
@@ -131,17 +157,15 @@ class MSFAIController:
             
     def _build_tools_def(self):
         """Builds JSON tools definition for AI."""
-        # This is a focused list to keep context small. Orchestrator can call ALL tools.
-        # We define core tools and representative tools from other categories.
         self.tools_def = [
             {
                 "type": "function",
                 "function": {
                     "name": "search_msf_modules",
-                    "description": "Searches for Metasploit modules.",
+                    "description": "Searches for Metasploit modules by keyword (e.g., 'bluekeep', 'eternalblue', 'smb'). Returns up to 10 results.",
                     "parameters": {
                         "type": "object",
-                        "properties": {"query": {"type": "string"}},
+                        "properties": {"query": {"type": "string", "description": "Search keyword or CVE"}},
                         "required": ["query"]
                     }
                 }
@@ -150,14 +174,14 @@ class MSFAIController:
                 "type": "function",
                 "function": {
                     "name": "run_exploit",
-                    "description": "Executes a Metasploit module.",
+                    "description": "Executes a specified Metasploit module with given options.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "module_path": {"type": "string"},
-                            "options": {"type": "object"}
+                            "module_path": {"type": "string", "description": "Full path to the module (e.g., 'exploit/windows/smb/ms17_010_eternalblue')"},
+                            "options": {"type": "object", "description": "Module options as key-value pairs (e.g., {'RHOSTS': '192.168.1.1'})"}
                         },
-                        "required": ["module_path"]
+                        "required": ["module_path", "options"]
                     }
                 }
             },
@@ -165,12 +189,12 @@ class MSFAIController:
                 "type": "function",
                 "function": {
                     "name": "check_port_open",
-                    "description": "Checks if a TCP port is open on target.",
+                    "description": "Performs a quick TCP port check on a target host.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "target": {"type": "string"},
-                            "port": {"type": "integer"}
+                            "target": {"type": "string", "description": "IP address or hostname"},
+                            "port": {"type": "integer", "description": "TCP port number"}
                         },
                         "required": ["target", "port"]
                     }
@@ -179,32 +203,31 @@ class MSFAIController:
             {
                 "type": "function",
                 "function": {
-                    "name": "geolocate_ip",
-                    "description": "Geolocates an IP address.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"ip": {"type": "string"}},
-                        "required": ["ip"]
-                    }
-                }
-            },
-            # Add Orchestrator hook
-            {
-                "type": "function",
-                "function": {
                     "name": "orchestrate_task",
-                    "description": "DECOMPOSE complex objectives into multiple steps. Use this for 'scan and exploit', 'full audit', etc.",
+                    "description": "EXPERT MODE: Highly efficient autonomous execution of complex security goals. Use this for any multi-step operation like 'full reconnaissance', 'vulnerability scan and exploit', or 'post-exploitation'. It manages dependencies and context automatically.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "objective": {"type": "string", "description": "The complex goal to achieve"}
+                            "objective": {"type": "string", "description": "The high-level security goal to achieve."}
                         },
                         "required": ["objective"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "set_security_mode",
+                    "description": "Sets the security mode of the application.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "mode": {"type": "string", "enum": ["safe", "unsafe"], "description": "The security mode to set"}
+                        },
+                        "required": ["mode"]
+                    }
+                }
             }
-            # Note: We expose limited tools to the chat model to encourage use of orchestration
-            # for complex tasks, or specific tools for simple Q&A.
         ]
 
     def process_input(self, user_input: str):
@@ -257,13 +280,25 @@ class MSFAIController:
                     
                     if func_name == "orchestrate_task":
                         # Handover to Orchestrator
-                        print_status("Mode Orchestration détecté", "info")
-                        plan = self.orchestrator.decompose_objective(args['objective'])
-                        results = self.orchestrator.execute_plan(plan, callback=lambda s: print_status(s, "exec"))
+                        print_status("Mode Orchestration détecté (Langgraph)", "info")
+                        results = self.orchestrator.execute_plan(args['objective'])
+
+                        # Detailed summary back to AI
+                        summary = {
+                            "status": "completed",
+                            "steps_executed": len(results),
+                            "details": []
+                        }
+                        for step_id, res in results.items():
+                            summary["details"].append({
+                                "step": step_id,
+                                "tool": res.get("tool"),
+                                "success": res.get("success"),
+                                "result_preview": str(res.get("result"))[:200] + "..." if res.get("result") else None,
+                                "error": res.get("error")
+                            })
                         
-                        # Summarize results back to AI
-                        result_summary = f"Orchestration completed. Results: {len(results)} steps executed."
-                        self.conversation.add_tool_result(tc.id, result_summary)
+                        self.conversation.add_tool_result(tc.id, json.dumps(summary, indent=2))
                     
                     elif func_name in self.tools_map:
                         print_status(f"Exécution outil: {func_name}", "exec")
@@ -291,7 +326,20 @@ class MSFAIController:
 class ConversationHistory:
     """Manages chat history."""
     def __init__(self):
-        self.messages = [{"role": "system", "content": "You are MSF-AI, an expert penetration testing assistant. You are helpful, compliant, and focused on security assessment."}]
+        self.messages = [{
+            "role": "system",
+            "content": """You are MSF-AI, an expert penetration testing assistant powered by Metasploit.
+            Your goal is to be highly efficient in security assessments.
+
+            Guidelines:
+            1. Use 'orchestrate_task' for any complex or multi-step objectives. It is more efficient than manual tool calling.
+            2. For simple checks (e.g., checking a port, geolocating an IP), use the specific tools directly.
+            3. Always check the 'security_mode' before performing any potentially intrusive action.
+            4. If a tool fails, analyze the error and try an alternative approach or tool.
+            5. Provide concise and technical responses.
+            6. You can manipulate your own configuration using 'set_security_mode' if the user requests it.
+            """
+        }]
         self.temp_context = None
 
     def add_message(self, role, content, tool_calls=None):
