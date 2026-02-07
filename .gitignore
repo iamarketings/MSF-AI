@@ -4,4 +4,3 @@ __pycache__/
 # Ignore environment variables
 .env
 reports/
-skills/generated/
