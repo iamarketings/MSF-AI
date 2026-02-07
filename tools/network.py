@@ -1,22 +1,23 @@
 """
-Network Utilities Module for MSF-AI v4
+Module d'Utilitaires Réseau pour MSF-AI v4
 """
 import socket
 import ipaddress
 import requests
 import json
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List
 
 def expand_cidr(cidr: str) -> List[str]:
-    """Expands a CIDR notation into a list of IPs."""
+    """Étend une notation CIDR en une liste d'adresses IP."""
     try:
         return [str(ip) for ip in ipaddress.IPv4Network(cidr)]
     except Exception as e:
-        return [f"Error: {e}"]
+        return [f"Erreur : {e}"]
 
 def geolocate_ip(ip: str) -> Dict[str, Any]:
-    """Geolocates an IP address using ip-api.com."""
+    """Géolocalise une adresse IP en utilisant ip-api.com."""
     try:
         response = requests.get(f"http://ip-api.com/json/{ip}", timeout=5)
         return response.json()
@@ -24,14 +25,14 @@ def geolocate_ip(ip: str) -> Dict[str, Any]:
         return {"status": "fail", "error": str(e)}
 
 def get_public_ip() -> str:
-    """Returns the current public IP address."""
+    """Retourne l'adresse IP publique actuelle."""
     try:
         return requests.get("https://api.ipify.org", timeout=5).text
     except Exception as e:
-        return f"Error: {e}"
+        return f"Erreur : {e}"
 
 def parse_nmap_xml(file_path: str) -> Dict[str, Any]:
-    """Parses Nmap XML output for ports and services."""
+    """Analyse la sortie XML de Nmap pour extraire les ports et services."""
     try:
         tree = ET.parse(file_path)
         root = tree.getroot()
@@ -52,7 +53,7 @@ def parse_nmap_xml(file_path: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 def port_knock(ip: str, ports: List[int]) -> str:
-    """Performs a port knocking sequence."""
+    """Effectue une séquence de port knocking."""
     try:
         for port in ports:
             try:
@@ -62,30 +63,43 @@ def port_knock(ip: str, ports: List[int]) -> str:
                 sock.close()
             except:
                 pass
-        return f"Knock sequence {ports} sent to {ip}"
+        return f"Séquence de knock {ports} envoyée à {ip}"
     except Exception as e:
-        return f"Error: {e}"
+        return f"Erreur : {e}"
 
 def reverse_dns(ip: str) -> str:
-    """Performs reverse DNS lookup."""
+    """Effectue une recherche DNS inversée."""
     try:
         return socket.gethostbyaddr(ip)[0]
     except:
-        return "No PTR record"
+        return "Pas d'enregistrement PTR"
 
 def check_port_open(target: str, port: int) -> bool:
-    """Checks if a TCP port is open."""
+    """Vérifie si un port TCP est ouvert."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
+        sock.settimeout(1)
         result = sock.connect_ex((target, int(port)))
         sock.close()
         return result == 0
     except:
         return False
 
+def parallel_port_scan(target: str, ports: List[int]) -> Dict[str, bool]:
+    """Effectue un scan de ports parallèle pour plus d'efficacité."""
+    results = {}
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(check_port_open, target, port): port for port in ports}
+        for future in as_completed(futures):
+            port = futures[future]
+            try:
+                results[str(port)] = future.result()
+            except:
+                results[str(port)] = False
+    return results
+
 def get_tools() -> Dict[str, Any]:
-    """Returns tool definitions for this module."""
+    """Retourne les définitions des outils pour ce module."""
     return {
         "expand_cidr": expand_cidr,
         "geolocate_ip": geolocate_ip,
@@ -93,5 +107,6 @@ def get_tools() -> Dict[str, Any]:
         "parse_nmap_xml": parse_nmap_xml,
         "port_knock": port_knock,
         "reverse_dns": reverse_dns,
-        "check_port_open": check_port_open
+        "check_port_open": check_port_open,
+        "parallel_port_scan": parallel_port_scan
     }
