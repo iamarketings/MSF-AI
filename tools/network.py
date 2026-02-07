@@ -85,10 +85,10 @@ def check_port_open(target: str, port: int) -> bool:
     except:
         return False
 
-def parallel_port_scan(target: str, ports: List[int]) -> Dict[str, bool]:
+def parallel_port_scan(target: str, ports: List[int], threads: int = 20) -> Dict[str, bool]:
     """Effectue un scan de ports parallèle pour plus d'efficacité."""
     results = {}
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(check_port_open, target, port): port for port in ports}
         for future in as_completed(futures):
             port = futures[future]
@@ -97,6 +97,43 @@ def parallel_port_scan(target: str, ports: List[int]) -> Dict[str, bool]:
             except:
                 results[str(port)] = False
     return results
+
+def nmap_scan(target: str, options: str = "-sV -F") -> Dict[str, Any]:
+    """Exécute un scan Nmap local et retourne les résultats parsés."""
+    import subprocess
+    import tempfile
+    import os
+    
+    try:
+        # Fichier temporaire pour la sortie XML
+        fd, temp_path = tempfile.mkstemp(suffix='.xml')
+        os.close(fd)
+        
+        # Commande nmap
+        # On utilise --no-stylesheet pour éviter des problèmes de parsing
+        cmd = ["nmap", "-oX", temp_path] + options.split() + [target]
+        
+        # Exécution (timeout 5 min)
+        subprocess.run(cmd, check=True, timeout=300, capture_output=True)
+        
+        # Parsing
+        results = parse_nmap_xml(temp_path)
+        
+        # Nettoyage
+        os.remove(temp_path)
+        
+        return results
+    except subprocess.CalledProcessError as e:
+        return {"error": f"Erreur nmap: {e.stderr.decode()}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def resolve_host(hostname: str) -> str:
+    """Résout un nom d'hôte en adresse IP."""
+    try:
+        return socket.gethostbyname(hostname)
+    except Exception as e:
+        return f"Erreur de résolution : {e}"
 
 def get_tools() -> Dict[str, Any]:
     """Retourne les définitions des outils pour ce module."""
@@ -107,6 +144,8 @@ def get_tools() -> Dict[str, Any]:
         "parse_nmap_xml": parse_nmap_xml,
         "port_knock": port_knock,
         "reverse_dns": reverse_dns,
+        "resolve_host": resolve_host,
         "check_port_open": check_port_open,
-        "parallel_port_scan": parallel_port_scan
+        "parallel_port_scan": parallel_port_scan,
+        "nmap_scan": nmap_scan
     }

@@ -19,8 +19,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from msf_aiv4.msf_model import MSFModel
 from msf_aiv4.msf_view import MSFView, print_status, print_thinking
 from msf_aiv4.msf_rag import create_rag_library
-from msf_aiv4.msf_orchestrator import LanggraphOrchestrator
+from msf_aiv4.msf_orchestrator import LanggraphOrchestrator, AuditLogger
 from msf_aiv4.tools import network, web, postexp, reporting, recon, os_tools
+from msf_aiv4.skill_manager import SkillManager
 
 # Configuration du logger
 logging.basicConfig(
@@ -30,26 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('MSF_AI.Controller')
 
-class AuditLogger:
-    """Gère l'audit détaillé de toutes les actions offensives en format JSON."""
-    def __init__(self, log_file="audit.json"):
-        self.log_file = log_file
 
-    def log_action(self, action, target, params, result, status="pending", user="system"):
-        import time
-        import json
-        entry = {
-            "timestamp": time.time(),
-            "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "user": user,
-            "action": action,
-            "target": target,
-            "params": params,
-            "result": str(result)[:500] if result else None,
-            "status": status
-        }
-        with open(self.log_file, "a") as f:
-            f.write(json.dumps(entry) + "\n")
 
 class MSFAIController:
     """
@@ -81,7 +63,10 @@ class MSFAIController:
 
         # État
         self.conversation = ConversationHistory()
-        self.audit = AuditLogger()
+        self.audit = AuditLogger("audit_full.jsonl")
+        
+        # Init Skill Manager
+        self.skill_manager = SkillManager(os.path.dirname(__file__))
 
     def _load_config(self) -> Dict[str, Any]:
         """Charge la configuration depuis le fichier JSON."""
@@ -137,8 +122,8 @@ class MSFAIController:
         self._build_tools_map()
         self._build_tools_def()
 
-        # 5. Initialisation de l'Orchestrateur
-        self.orchestrator = LanggraphOrchestrator(self.ai_client, self.config, self.tools_map, self.api_model)
+        # 4. Orchestrateur
+        self.orchestrator = LanggraphOrchestrator(self.ai_client, self.config, self.tools_map, self.audit, self.api_model)
 
         return True
 
@@ -153,6 +138,7 @@ class MSFAIController:
             "get_module_options": self.msf.get_module_options,
             "check_vulnerability": self.msf.check_vulnerability,
             "run_exploit": self.msf.run_exploit,
+            "wait_for_job": self.msf.wait_for_job,
             "list_sessions": self.msf.list_sessions,
             "session_execute": self.msf.session_execute,
             "set_security_mode": self.set_security_mode
@@ -183,6 +169,13 @@ class MSFAIController:
             def create_wrapper(f):
                 return lambda **kwargs: f(self.msf.client, **kwargs)
             self.tools_map[name] = create_wrapper(func)
+
+        # Outil d'évolution (SkillManager)
+        self.tools_map["create_new_skill"] = self.skill_manager.create_skill
+        self.tools_map["install_external_tool"] = self.skill_manager.install_external_tool
+
+        # Ajouter les skills générés
+        self.tools_map.update(self.skill_manager.skills_map)
 
     def _build_tools_def(self):
         """Construit la définition JSON des outils pour l'IA."""
@@ -244,6 +237,35 @@ class MSFAIController:
             {
                 "type": "function",
                 "function": {
+                    "name": "wait_for_job",
+                    "description": "Attend la fin d'une tâche Metasploit (scan ou exploit) pour récupérer le résultat.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "job_id": {"type": "string", "description": "L'ID de la tâche retourné par run_exploit ou auxiliary."},
+                            "timeout": {"type": "integer", "description": "Temps d'attente maximum en secondes (défaut: 60)."}
+                        },
+                        "required": ["job_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "resolve_host",
+                    "description": "Résout un nom de domaine en adresse IP (essentiel pour les outils ne supportant pas le DNS).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "hostname": {"type": "string", "description": "Nom de domaine à résoudre (ex: comorestelecom.km)"}
+                        },
+                        "required": ["hostname"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "check_port_open",
                     "description": "Effectue une vérification rapide de port TCP sur un hôte cible.",
                     "parameters": {
@@ -259,6 +281,37 @@ class MSFAIController:
             {
                 "type": "function",
                 "function": {
+                    "name": "parallel_port_scan",
+                    "description": "Scan de ports multi-threadé rapide (plus rapide que check_port_open).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "Adresse IP cible"},
+                            "ports": {"type": "array", "items": {"type": "integer"}, "description": "Liste de ports à scanner"},
+                            "threads": {"type": "integer", "description": "Nombre de threads (défaut: 20)"}
+                        },
+                        "required": ["target", "ports"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "nmap_scan",
+                    "description": "Exécute un scan Nmap local et retourne les résultats. À PRIVILÉGIER pour la reconnaissance.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "IP ou plage CIDR"},
+                            "options": {"type": "string", "description": "Options Nmap (ex: '-sV -F' ou '-p- -A'). Défaut: '-sV -F'"}
+                        },
+                        "required": ["target"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "orchestrate_task",
                     "description": "MODE EXPERT : Exécution autonome hautement efficace d'objectifs de sécurité complexes. Utilisez ceci pour toute opération multi-étapes. Gère automatiquement les dépendances et le contexte.",
                     "parameters": {
@@ -267,6 +320,118 @@ class MSFAIController:
                             "objective": {"type": "string", "description": "L'objectif de sécurité de haut niveau à atteindre."}
                         },
                         "required": ["objective"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_new_skill",
+                    "description": "CRITIQUE: Crée un nouvel outil Python pour combler une lacune. Utiliser quand aucun autre outil ne suffit.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Nom de la fonction (ex: 'extract_exif')"},
+                            "description": {"type": "string", "description": "Description précise pour l'Architecte (si code absent)."},
+                            "code": {"type": "string", "description": "Code complet (OPTIONNEL: Si vide, l'Architecte le générera)."}
+                        },
+                        "required": ["name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "install_external_tool",
+                    "description": "INSTALLE UN OUTIL EXTERNE (ex: git clone) et crée automatiquement un wrapper Python. À utiliser pour les outils complexes (sqlmap, nuclei...).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": {"type": "string", "description": "Nom de l'outil (ex: 'sqlmap')"},
+                            "install_cmd": {"type": "string", "description": "Commande Bash pour installer (ex: 'git clone ...')"},
+                            "usage_description": {"type": "string", "description": "Explication de comment utiliser l'outil en CLI, pour que l'Architecte puisse créer le wrapper."}
+                        },
+                        "required": ["tool_name", "install_cmd", "usage_description"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_vulnerability_report",
+                    "description": "OBLIGATOIRE: Sauvegarde un rapport détaillé de vulnérabilité découverte. À utiliser IMMÉDIATEMENT après la découverte d'une faille.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "URL ou IP de la cible"},
+                            "vulnerability": {
+                                "type": "object",
+                                "description": "Objet contenant: type (SQLi/XSS/RCE...), severity (low/medium/high/critical), description, evidence, remediation",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "severity": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "evidence": {"type": "string"},
+                                    "remediation": {"type": "string"}
+                                },
+                                "required": ["type", "severity", "description"]
+                            }
+                        },
+                        "required": ["target", "vulnerability"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_exploit_result",
+                    "description": "Sauvegarde le résultat d'une tentative d'exploitation (succès ou échec).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "Cible exploitée"},
+                            "exploit_name": {"type": "string", "description": "Nom de l'exploit utilisé"},
+                            "result": {
+                                "type": "object",
+                                "description": "Résultat: success (bool), output, session_id, error...",
+                                "properties": {
+                                    "success": {"type": "boolean"},
+                                    "output": {"type": "string"},
+                                    "session_id": {"type": "string"}
+                                }
+                            }
+                        },
+                        "required": ["target", "exploit_name", "result"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_scan_results",
+                    "description": "Sauvegarde les résultats d'un scan (ports, subdomains, directories...).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "Cible scannée"},
+                            "scan_type": {"type": "string", "description": "Type: port_scan, subdomain_discovery, directory_enum..."},
+                            "results": {"type": "object", "description": "Résultats du scan sous forme d'objet ou liste"}
+                        },
+                        "required": ["target", "scan_type", "results"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_summary_report",
+                    "description": "Génère un rapport de synthèse complet pour une cible donnée (agrège toutes les vulnérabilités/scans/exploits).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "Cible pour laquelle générer le rapport de synthèse"}
+                        },
+                        "required": ["target"]
                     }
                 }
             },
@@ -337,6 +502,20 @@ class MSFAIController:
                 key = parts[1].upper()
                 value = parts[2]
                 self.orchestrator.context[key] = value
+                
+                # Mise à jour du prompt système dynamique
+                self.conversation.update_context(key, value)
+                if key == "RHOSTS":
+                    self.conversation.update_context("TARGET", value)
+                    # Tentative de résolution automatique
+                    try:
+                        resolved_ip = network.resolve_host(value)
+                        if "Erreur" not in resolved_ip:
+                            self.conversation.update_context("TARGET_IP", resolved_ip)
+                            print_status(f"Résolution automatique: {value} -> {resolved_ip}", "success")
+                    except:
+                        pass
+                    
                 print_status(f"Contexte mis à jour : {key} = {value}", "success")
             return
 
@@ -358,13 +537,17 @@ class MSFAIController:
         Exécute un tour de conversation complet de manière récursive.
         Gère l'appel API, le parsing (Natif/DSML), l'exécution des outils, et la boucle de retour.
         """
-        if recursion_depth > 10:
-            print_status("Limite de récursion atteinte (boucle infinie potentielle).", "warning")
+        # Augmentation de la limite pour permettre des audits plus longs
+        if recursion_depth > 30:
+            print_status("Limite d'autonomie atteinte (30 actions). Pause de sécurité.", "warning")
             return
 
         print_thinking(True)
         try:
             # 4. Appel API (avec définition des outils)
+            if self.audit:
+                 self.audit.log_action("LLM_REQUEST", "API", self.conversation.get_messages(), None, "pending")
+            
             response = self.ai_client.chat.completions.create(
                 model=self.api_model,
                 messages=self.conversation.get_messages(),
@@ -373,6 +556,9 @@ class MSFAIController:
                 stream=False,
                 temperature=0.3
             )
+            
+            if self.audit:
+                 self.audit.log_action("LLM_RESPONSE", "API", None, response.model_dump(), "success")
 
             msg = response.choices[0].message
             content = msg.content
@@ -416,9 +602,45 @@ class MSFAIController:
                         }
                         self.conversation.add_tool_result(tc.id, json.dumps(summary, indent=2))
 
+                    elif func_name == "create_new_skill":
+                        # CRÉATION DE SKILL
+                        print_status(f"🔧 CRÉATION SKILL: {args.get('name')}", "warning")
+                        res = self.skill_manager.create_skill(args.get('name'), args.get('code'), args.get('description', ''))
+                        
+                        if "Succès" in res:
+                            # Recharger les outils immédiatement
+                            self._build_tools_map()
+                        
+                        self.conversation.add_tool_result(tc.id, res)
+
+                    elif func_name == "install_external_tool":
+                        # INSTALLATION D'OUTIL
+                        print_status(f"⬇️ INSTALLATION OUTIL: {args.get('tool_name')}", "warning")
+                        res = self.skill_manager.install_external_tool(args.get('tool_name'), args.get('install_cmd'), args.get('usage_description'))
+                        
+                        if "Succès" in res:
+                            self._build_tools_map()
+                        
+                        self.conversation.add_tool_result(tc.id, res)
+
                     elif func_name in self.tools_map:
                         print_status(f"Exécution outil: {func_name}", "exec")
-                        target = args.get('target', args.get('rhosts', args.get('url', 'N/A')))
+                        
+                        # Extraction robuste de la cible pour les logs
+                        target = "N/A"
+                        # 1. Direct keys
+                        for key in ['target', 'RHOSTS', 'rhosts', 'hostname', 'ip', 'url', 'host']:
+                             if key in args and args[key]:
+                                 target = args[key]
+                                 break
+                        
+                        # 2. Nested options (ex: run_exploit)
+                        if target == "N/A" and 'options' in args and isinstance(args['options'], dict):
+                            for key in ['RHOSTS', 'rhosts', 'RHOST', 'rhost', 'TARGET', 'target']:
+                                if key in args['options'] and args['options'][key]:
+                                    target = args['options'][key]
+                                    break
+                                    
                         try:
                             self.audit.log_action(func_name, target, args, None, "pending")
                             res = self.tools_map[func_name](**args)
@@ -500,20 +722,40 @@ class ConversationHistory:
     def __init__(self):
         self.messages = [{
             "role": "system",
-            "content": """Vous êtes MSF-AI, un assistant expert en tests d'intrusion propulsé par Metasploit.
-            Votre objectif est d'être hautement efficace dans les évaluations de sécurité.
+            "content": """Vous êtes MSF-AI, un assistant expert qualifié et autonome.
 
-            Directives :
-            1. Utilisez 'orchestrate_task' pour tout objectif complexe ou multi-étapes. C'est plus efficace que l'appel d'outils manuel.
-            2. Utilisez 'search_vulnerabilities' et 'search_knowledge_base' pour ANTICIPER PROACTIVEMENT les attaques lorsque des services sont identifiés.
-            3. Pour des vérifications simples (ex: vérifier un port), utilisez les outils spécifiques directement.
-            4. Vérifiez toujours le 'security_mode' avant d'effectuer toute action potentiellement intrusive.
-            5. Si un outil échoue, analysez l'erreur et essayez une approche ou un outil alternatif.
-            6. Fournissez des réponses concises et techniques.
-            7. Vous pouvez manipuler votre propre configuration via 'set_security_mode' si l'utilisateur le demande.
-            """
+**HIERARCHIE DES OUTILS (À RESPECTER STRICTEMENT)**:
+1. 🥇 **METASPLOIT / STANDARD** : D'abord, cherchez un module existant (`search_msf_modules`).
+2. 🥈 **OUTILS EXTERNES** : Si Metasploit est limité, INSTALLEZ l'outil (`install_external_tool`).
+3. 🥉 **CRÉATION** : En dernier recours (`create_new_skill`).
+
+**CONTEXTE DYNAMIQUE**:
+{dynamic_context}
+
+**PROTOCOLE DE REPORTAGE OBLIGATOIRE**:
+- Rapports détaillés via `save_vulnerability_report`
+- Scan results via `save_scan_results`
+
+**Autonomie**:
+- Bypassez les erreurs SSL.
+- Mode UNSAFE = exploitation automatique.
+"""
         }]
+        self.base_system_prompt = self.messages[0]["content"]
+        self.dynamic_context = {"RHOSTS": "Non défini", "TARGET": "Non défini"}
+        self._refresh_system_prompt()
         self.temp_context = None
+
+    def _refresh_system_prompt(self):
+        """Met à jour le prompt système avec le contexte actuel."""
+        context_str = "\n".join([f"- {k}: {v}" for k,v in self.dynamic_context.items()])
+        self.messages[0]["content"] = self.base_system_prompt.replace("{dynamic_context}", context_str)
+
+    def update_context(self, key, value):
+        """Met à jour une variable de contexte et rafraîchit le prompt."""
+        self.dynamic_context[key] = value
+        self._refresh_system_prompt()
+
 
     def add_message(self, role, content, tool_calls=None):
         msg = {"role": role, "content": content}

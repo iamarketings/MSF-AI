@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-02-07T06:20:59.168739",
+  "target": "192.168.1.1:21",
+  "vulnerability": {
+    "type": "Port Status",
+    "severity": "low",
+    "description": "Port FTP (21) ferm\u00e9 - Impossible de scanner le service FTP",
+    "evidence": "Check port open returned false",
+    "remediation": "V\u00e9rifier si le service FTP doit \u00eatre activ\u00e9 ou si un autre port est utilis\u00e9"
+  },
+  "scanner": "MSF-AI v4.0"
+}

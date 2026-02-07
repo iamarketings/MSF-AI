@@ -6,6 +6,8 @@ import json
 import logging
 import time
 import re
+import os
+import datetime
 from typing import List, Dict, Any, Optional, Annotated, TypedDict
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
@@ -23,8 +25,30 @@ class AgentState(TypedDict):
     error: Optional[str]
     history: List[str]
 
+class AuditLogger:
+    """Système de journalisation d'audit détaillé"""
+    def __init__(self, log_file="audit_log.jsonl"):
+        self.log_file = os.path.join(os.path.dirname(__file__), log_file)
+        
+    def log_action(self, action: str, target: str, input_data: Any, output_data: Any, status: str):
+        entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "action": action,
+            "target": target,
+            "status": status,
+            "input": str(input_data), # Force string conversion for safety
+            "output": str(output_data) # Force string conversion for safety
+        }
+        
+        # Écriture atomique (append mode)
+        with open(self.log_file, "a", encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            
+        # Aussi logger dans le logger système standard pour debug
+        logger.info(f"AUDIT - {action} on {target} ({status})")
+
 class LanggraphOrchestrator:
-    def __init__(self, ai_client, config_manager, tools_map, api_model="deepseek-chat"):
+    def __init__(self, ai_client, config_manager, tools_map, audit_logger=None, api_model="deepseek-chat"):
         # Utilisation de l'enveloppe LangChain ChatOpenAI pour la compatibilité Langgraph
         self.llm = ChatOpenAI(
             model=api_model,
@@ -34,6 +58,7 @@ class LanggraphOrchestrator:
         )
         self.config = config_manager
         self.tools_map = tools_map
+        self.audit = audit_logger
         self.context = {} # Contexte global partagé entre les exécutions
         self.workflow = self._build_graph()
 
@@ -154,10 +179,21 @@ class LanggraphOrchestrator:
             res = {"success": False, "error": f"Outil inconnu : {tool_name}"}
         else:
             try:
+                target = state['context'].get('RHOSTS', state['context'].get('target', 'unknown'))
+                
+                if self.audit:
+                    self.audit.log_action(tool_name, target, args, None, "pending")
+
                 func = self.tools_map[tool_name]
-                result = func(**args)
-                res = {"success": True, "result": result, "tool": tool_name}
+                result_output = func(**args)
+                
+                if self.audit:
+                    self.audit.log_action(tool_name, target, args, str(result_output), "success")
+
+                res = {"success": True, "output": str(result_output)}
             except Exception as e:
+                if self.audit:
+                     self.audit.log_action(tool_name, target, args, str(e), "error")
                 res = {"success": False, "error": str(e), "tool": tool_name}
 
         new_results = state['results'].copy()
@@ -172,12 +208,21 @@ class LanggraphOrchestrator:
     def _analyzer_node(self, state: AgentState):
         """Analyse les résultats et met à jour le contexte."""
         if not state['plan']: return {"context": state['context']}
-        last_step_id = str(state['plan'][state['current_step_index'] - 1]['id'])
-        last_result = state['results'][last_step_id]
-
+        
         new_context = state['context'].copy()
-        if last_result['success']:
-            str_res = str(last_result['result'])
+
+        if state['results']:
+            # Get the ID of the last executed step from the plan
+            last_step_id = str(state['plan'][state['current_step_index'] - 1]['id'])
+            last_result = state['results'][last_step_id]
+            
+            # Support des clés 'output' (nouveau standard) ou 'result' (ancien)
+            str_res = str(last_result.get('output', last_result.get('result', '')))
+            
+            # Analyse de succès/échec
+            if not last_result.get('success', False):
+                 return {"error": f"L'outil {last_step_id} a échoué: {str_res}", "context": new_context} # Return context even on error
+
             # Extraction IP
             ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str_res)
             if ip_match: new_context['RHOSTS'] = ip_match.group(0)

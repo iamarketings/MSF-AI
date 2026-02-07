@@ -1,13 +1,14 @@
-"""
-Outils d'Automatisation Web pour MSF-AI v4
-"""
 import requests
 import re
 import time
+import urllib3
 from functools import wraps
 from typing import Dict, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+
+# Disable SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def rate_limit(calls_per_minute=10):
     """Limiteur de débit pour les appels d'outils web."""
@@ -41,7 +42,7 @@ def get_http_headers(url: str) -> Dict[str, str]:
     """Récupère les en-têtes HTTP pour une URL."""
     try:
         if not url.startswith("http"): url = "http://" + url
-        resp = requests.head(url, timeout=5)
+        resp = requests.head(url, timeout=5, verify=False)
         return dict(resp.headers)
     except Exception as e:
         return {"error": str(e)}
@@ -51,7 +52,7 @@ def extract_forms(url: str) -> List[Dict[str, Any]]:
     """Extrait les formulaires HTML d'une page en utilisant BeautifulSoup."""
     try:
         if not url.startswith("http"): url = "http://" + url
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=10, verify=False)
         soup = BeautifulSoup(resp.text, 'html.parser')
         forms = []
         for i, form in enumerate(soup.find_all('form')):
@@ -79,7 +80,7 @@ def check_security_headers(url: str) -> Dict[str, str]:
     """Vérifie la présence d'en-têtes de sécurité courants."""
     try:
         if not url.startswith("http"): url = "http://" + url
-        resp = requests.head(url, timeout=5)
+        resp = requests.head(url, timeout=5, verify=False)
         headers = resp.headers
         security_headers = [
             "Content-Security-Policy",
@@ -102,7 +103,7 @@ def check_waf(url: str) -> str:
     try:
         if not url.startswith("http"): url = "http://" + url
         payload = {"q": "<script>alert(1)</script>"}
-        resp = requests.get(url, params=payload, timeout=5)
+        resp = requests.get(url, params=payload, timeout=5, verify=False)
         if resp.status_code in [403, 406, 501]:
             return f"WAF potentiel détecté (Statut {resp.status_code})"
         headers = str(resp.headers).lower()
@@ -122,7 +123,7 @@ def enumerate_directories(url: str, wordlist: List[str] = ["admin", "login", "ba
     for path in wordlist:
         target = url + path
         try:
-            r = requests.head(target, timeout=3)
+            r = requests.head(target, timeout=3, verify=False)
             if r.status_code < 400:
                 found.append(target)
         except:
@@ -136,7 +137,7 @@ def sql_injection_test(url: str, param: str) -> str:
         if not url.startswith("http"): url = "http://" + url
         # Test basé sur l'erreur
         target = f"{url}?{param}=1'"
-        r = requests.get(target, timeout=5)
+        r = requests.get(target, timeout=5, verify=False)
         errors = ["SQL syntax", "mysql_fetch", "ORA-", "PostgreSQL"]
         for err in errors:
             if err in r.text:

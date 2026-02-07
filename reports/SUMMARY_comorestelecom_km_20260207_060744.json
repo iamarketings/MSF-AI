@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-02-07T06:07:44.049213",
+  "target": "comorestelecom.km",
+  "statistics": {
+    "total_vulnerabilities": 0,
+    "total_exploits_attempted": 0,
+    "total_scans": 1,
+    "critical_vulns": 0,
+    "high_vulns": 0
+  },
+  "vulnerabilities": [],
+  "exploits": [],
+  "scans": [
+    {
+      "timestamp": "2026-02-07T06:01:16.444498",
+      "target": "comorestelecom.km",
+      "scan_type": "port_scan",
+      "results": {
+        "open_ports": [
+          80,
+          443,
+          22,
+          21
+        ],
+        "closed_ports": [
+          25,
+          3306,
+          8080
+        ],
+        "scan_method": "TCP connect",
+        "timestamp": "2024-01-15T10:30:00Z"
+      },
+      "scanner": "MSF-AI v4.0"
+    }
+  ]
+}

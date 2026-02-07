@@ -31,20 +31,65 @@ def dns_enumeration(domain: str) -> Dict[str, List[str]]:
             records[rtype] = [f"Erreur : {e}"]
     return records
 
+import os
+from concurrent.futures import ThreadPoolExecutor
+
 def subdomain_discovery(domain: str) -> List[str]:
-    """Découvre des sous-domaines via crt.sh."""
+    """Découvre des sous-domaines via crt.sh ET bruteforce."""
+    subdomains_found = set()
+    errors = []
+
+    # 1. Certificate Transparency (CRT.sh)
     try:
         url = f"https://crt.sh/?q=%.{domain}&output=json"
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=10, verify=False)
         if resp.ok:
             data = resp.json()
-            subs = set()
             for entry in data:
-                subs.add(entry['name_value'])
-            return list(subs)
-        return ["Échec de la requête crt.sh"]
-    except:
-        return ["Erreur lors de la requête crt.sh"]
+                subdomains_found.add(entry['name_value'])
+    except Exception as e:
+        errors.append(f"Crt.sh fail: {e}")
+
+    # 2. Bruteforce DNS
+    try:
+        # Chemin: msf_aiv4/tools/recon.py -> msf_aiv4/wordlists/subdomains.txt
+        wordlist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wordlists", "subdomains.txt")
+        
+        if os.path.exists(wordlist_path):
+            with open(wordlist_path, 'r') as f:
+                # Top 1000 pour la rapidité si beaucoup, ou tout si threadé
+                candidates = [line.strip() for line in f if line.strip()]
+            
+            # Fonction interne pour le threading
+            def resolve_subdomain(sub):
+                full_domain = f"{sub}.{domain}"
+                try:
+                    # Timeout court pour accélérer
+                    socket.gethostbyname(full_domain)
+                    return full_domain
+                except:
+                    return None
+
+            # 50 threads pour aller vite
+            with ThreadPoolExecutor(max_workers=50) as executor:
+                results = executor.map(resolve_subdomain, candidates)
+                
+            for res in results:
+                if res:
+                    subdomains_found.add(res)
+        else:
+            errors.append("Wordlist locale introuvable")
+
+    except Exception as e:
+        errors.append(f"Bruteforce fail: {e}")
+
+    # Nettoyage des wildcards et doublons
+    clean_subs = {s.replace('*.', '') for s in subdomains_found}
+    
+    if not clean_subs:
+        return ["Aucun sous-domaine trouvé (ou erreur crt.sh + bruteforce)"] + errors
+        
+    return list(clean_subs)
 
 def certificate_transparency(domain: str) -> List[str]:
     """Alias pour la découverte de sous-domaines via la transparence des certificats."""

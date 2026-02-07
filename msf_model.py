@@ -99,6 +99,24 @@ class MSFModel:
         except Exception as e:
             return f"Erreur d'exploitation : {e}"
 
+    def wait_for_job(self, job_id: str, timeout: int = 60) -> str:
+        """Attend la fin d'une tâche et tente de récupérer le résultat."""
+        import time
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            jobs = self.client.jobs.list
+            if str(job_id) not in jobs:
+                # Le job n'est plus dans la liste, il est fini.
+                # Essayons de voir si une session a été créée
+                sessions = self.client.sessions.list
+                # Filtrer les sessions récentes ? Difficile sans timestamp précis.
+                # On retourne simplement que le job est fini.
+                return f"Tâche {job_id} terminée. Vérifiez les sessions avec list_sessions()."
+            time.sleep(2)
+            
+        return f"Timeout: La tâche {job_id} tourne toujours après {timeout}s."
+
     def list_sessions(self) -> dict:
         """Liste les sessions actives."""
         if not self.client: return {}
