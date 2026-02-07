@@ -298,7 +298,7 @@ class MSFAIController:
                 "type": "function",
                 "function": {
                     "name": "nmap_scan",
-                    "description": "Exécute un scan Nmap local et retourne les résultats. À PRIVILÉGIER pour la reconnaissance.",
+                    "description": "SCANNER PRINCIPAL: Exécute le binaire Nmap LOCAL. N'INSTALLEZ PAS NMAP, UTILISEZ CECI.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -327,7 +327,7 @@ class MSFAIController:
                 "type": "function",
                 "function": {
                     "name": "create_new_skill",
-                    "description": "CRITIQUE: Crée un nouvel outil Python pour combler une lacune. Utiliser quand aucun autre outil ne suffit.",
+                    "description": "CRITIQUE: Crée un nouvel outil Python. ÉCRIVEZ TOUJOURS LE CODE vous-même dans l'argument 'code' pour éviter les erreurs de génération externe.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -592,6 +592,30 @@ class MSFAIController:
                         continue
 
                     executed_some = True
+
+                    # --- DÉBUT INJECTION CONTEXTE ---
+                    ctx_rhosts = self.conversation.dynamic_context.get('RHOSTS')
+                    # Fallback context global
+                    if not ctx_rhosts or ctx_rhosts == "Non défini":
+                        ctx_rhosts = self.orchestrator.context.get('RHOSTS')
+
+                    if ctx_rhosts and ctx_rhosts not in ["Non défini", "127.0.0.1", "localhost"]:
+                        # 1. Injection directe (top-level args)
+                        for key in ['target', 'RHOSTS', 'rhosts', 'hostname', 'ip', 'url', 'host']:
+                            if key in args:
+                                val = str(args[key])
+                                if not val or val.lower() in ["", "none", "127.0.0.1", "localhost"]:
+                                    args[key] = ctx_rhosts
+                                    print_status(f"🎯 Injection Automatique: {key} -> {ctx_rhosts}", "success")
+
+                        # 2. Injection nested (options MSF)
+                        if 'options' in args and isinstance(args['options'], dict):
+                            # Si RHOSTS est manquant ou vide dans les options
+                            if 'RHOSTS' not in args['options'] or not args['options']['RHOSTS']:
+                                args['options']['RHOSTS'] = ctx_rhosts
+                                print_status(f"🎯 Injection Automatique (Options): RHOSTS -> {ctx_rhosts}", "success")
+                    # --- FIN INJECTION CONTEXTE ---
+
                     if func_name == "orchestrate_task":
                         print_status("Mode Orchestration détecté (Langgraph)", "info")
                         results = self.orchestrator.execute_plan(args.get('objective', ''))
@@ -724,10 +748,18 @@ class ConversationHistory:
             "role": "system",
             "content": """Vous êtes MSF-AI, un assistant expert qualifié et autonome.
 
+**RÈGLES D'INTERACTION**:
+1. 🧠 **EXPLIQUER D'ABORD**: Toujours expliquer votre plan en Français AVANT d'exécuter un outil. Ne soyez pas un robot silencieux.
+2. 🛑 **NE JAMAIS INSTALLER**: Nmap, Metasploit, Python, WHOIS, DNS sont DÉJÀ installés. N'utilisez `install_external_tool` QUE pour des outils exotiques absents.
+3. 🎯 **CIBLAGE**: Vérifiez TOUJOURS que `RHOSTS` ou `TARGET` est défini avant de lancer un scan ou un exploit.
+
 **HIERARCHIE DES OUTILS (À RESPECTER STRICTEMENT)**:
-1. 🥇 **METASPLOIT / STANDARD** : D'abord, cherchez un module existant (`search_msf_modules`).
+1. 🥇 **OUTILS INTERNES (DISPONIBLES)** :
+   - Scan: `nmap_scan` (Préférez ceci), `parallel_port_scan`, `check_port_open`
+   - Recon: `whois_lookup`, `dns_enumeration`, `subdomain_discovery`
+   - MSF: `search_msf_modules`, `run_exploit`, `check_vulnerability`
 2. 🥈 **OUTILS EXTERNES** : Si Metasploit est limité, INSTALLEZ l'outil (`install_external_tool`).
-3. 🥉 **CRÉATION** : En dernier recours (`create_new_skill`).
+3. 🥉 **CRÉATION** : Si un outil manque, ÉCRIVEZ LE CODE PYTHON vous-même et utilisez `create_new_skill` avec l'argument `code`. Ne comptez pas sur l'Architecte.
 
 **CONTEXTE DYNAMIQUE**:
 {dynamic_context}
@@ -738,7 +770,7 @@ class ConversationHistory:
 
 **Autonomie**:
 - Bypassez les erreurs SSL.
-- Mode UNSAFE = exploitation automatique.
+- Mode UNSAFE = exploitation automatique et création d'outils offensive.
 """
         }]
         self.base_system_prompt = self.messages[0]["content"]
