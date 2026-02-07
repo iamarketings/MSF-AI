@@ -92,22 +92,27 @@ class LanggraphOrchestrator:
         tools_list = "\n".join([f"- {name}" for name in self.tools_map.keys()])
 
         prompt = f"""
-        Vous êtes un orchestrateur expert en tests d'intrusion.
+        Vous êtes un orchestrateur expert en tests d'intrusion (Pentest).
+        Votre rôle est de planifier une attaque structurée et logique.
+
         Objectif : {state['objective']}
-        Contexte : {json.dumps(state['context'])}
+        Contexte Global : {json.dumps(state['context'])} (Utilisez RHOSTS/TARGET s'il est défini)
         Résultats actuels : {json.dumps(state['results'])}
 
-        Outils disponibles :
+        Outils disponibles (UTILISEZ CEUX-CI, NE PAS INSTALLER NMAP/MSF) :
         {tools_list}
 
-        Règles :
-        1. Créez une séquence logique d'étapes.
-        2. Utilisez les modules Metasploit et autres outils de manière appropriée.
-        3. Répondez UNIQUEMENT avec une liste JSON de tâches, chacune ayant 'id', 'tool', 'args' et 'description'.
+        Règles CRITIQUES :
+        1. Expliquez votre raisonnement pour chaque étape dans la description.
+        2. Si l'objectif implique un scan, utilisez `nmap_scan` ou `parallel_port_scan`.
+        3. Si l'objectif est d'exploiter, utilisez `search_msf_modules` puis `run_exploit` (si UNSAFE).
+        4. Ne demandez pas d'installer des outils qui sont déjà dans la liste ci-dessus.
+        5. Répondez UNIQUEMENT avec une liste JSON stricte.
 
-        Exemple :
+        Format JSON Attendu :
         [
-            {{"id": 1, "tool": "check_port_open", "args": {{"target": "10.0.0.1", "port": 80}}, "description": "Vérifier si le port HTTP est ouvert"}}
+            {{"id": 1, "tool": "nmap_scan", "args": {{"target": "TARGET_VALUE"}}, "description": "1. Je commence par scanner la cible pour identifier les services."}},
+            {{"id": 2, "tool": "search_msf_modules", "args": {{"query": "service_name"}}, "description": "2. Je cherche un exploit correspondant au service trouvé."}}
         ]
         """
 

@@ -127,6 +127,58 @@ class MSFAIController:
 
         return True
 
+    def _wrap_tool_with_context(self, func_name: str, func):
+        """
+        Enveloppe une fonction d'outil pour injecter automatiquement le contexte (RHOSTS, etc.)
+        si l'IA a oublié de le spécifier.
+        """
+        def wrapper(**kwargs):
+            # Liste des clés cibles possibles
+            target_keys = ['target', 'RHOSTS', 'rhosts', 'host', 'ip', 'url', 'hostname']
+
+            # Vérifier si une cible est déjà définie dans kwargs ou dans kwargs['options']
+            has_target = False
+            for key in target_keys:
+                if kwargs.get(key):
+                    has_target = True
+                    break
+
+            if not has_target and 'options' in kwargs and isinstance(kwargs['options'], dict):
+                for key in target_keys:
+                    if kwargs['options'].get(key):
+                        has_target = True
+                        break
+
+            # Si pas de cible, tenter l'injection depuis le contexte global
+            if not has_target:
+                global_target = self.conversation.dynamic_context.get('TARGET') or \
+                                self.conversation.dynamic_context.get('RHOSTS') or \
+                                (self.orchestrator.context.get('RHOSTS') if self.orchestrator else None)
+
+                if global_target and global_target != "Non défini":
+                    injected = False
+                    if func_name in ['run_exploit', 'check_vulnerability']:
+                         if 'options' not in kwargs: kwargs['options'] = {}
+                         kwargs['options']['RHOSTS'] = global_target
+                         injected = True
+
+                    elif func_name in ['nmap_scan', 'parallel_port_scan', 'check_port_open', 'save_scan_results', 'save_vulnerability_report']:
+                         kwargs['target'] = global_target
+                         injected = True
+
+                    elif func_name in ['check_waf', 'sql_injection_test', 'enumerate_directories', 'extract_forms', 'check_security_headers', 'screenshot_url']:
+                         url = global_target
+                         if not url.startswith("http") and not url.startswith("https"):
+                            url = f"http://{url}"
+                         kwargs['url'] = url
+                         injected = True
+
+                    if injected:
+                        print_status(f"⚠️ Context Auto-Inject: {global_target} pour {func_name}", "warning")
+
+            return func(**kwargs)
+        return wrapper
+
     def _build_tools_map(self):
         """Agrège tous les outils dans une carte unique."""
         # Outils MSF de base
@@ -176,6 +228,22 @@ class MSFAIController:
 
         # Ajouter les skills générés
         self.tools_map.update(self.skill_manager.skills_map)
+
+        # ---------------------------------------------------------
+        # Application du wrapper de contexte pour les outils ciblés
+        # ---------------------------------------------------------
+        context_aware_tools = [
+            'run_exploit', 'check_vulnerability',
+            'nmap_scan', 'parallel_port_scan', 'check_port_open',
+            'save_scan_results', 'save_vulnerability_report',
+            'check_waf', 'sql_injection_test', 'enumerate_directories',
+            'extract_forms', 'check_security_headers', 'screenshot_url'
+        ]
+
+        for tool_name in context_aware_tools:
+            if tool_name in self.tools_map:
+                original_func = self.tools_map[tool_name]
+                self.tools_map[tool_name] = self._wrap_tool_with_context(tool_name, original_func)
 
     def _build_tools_def(self):
         """Construit la définition JSON des outils pour l'IA."""
@@ -327,15 +395,15 @@ class MSFAIController:
                 "type": "function",
                 "function": {
                     "name": "create_new_skill",
-                    "description": "CRITIQUE: Crée un nouvel outil Python pour combler une lacune. Utiliser quand aucun autre outil ne suffit.",
+                    "description": "CRITIQUE: Crée un nouvel outil Python. VOUS DEVEZ GÉNÉRER LE CODE VOUS-MÊME dans le paramètre 'code' pour une autonomie totale.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "name": {"type": "string", "description": "Nom de la fonction (ex: 'extract_exif')"},
-                            "description": {"type": "string", "description": "Description précise pour l'Architecte (si code absent)."},
-                            "code": {"type": "string", "description": "Code complet (OPTIONNEL: Si vide, l'Architecte le générera)."}
+                            "description": {"type": "string", "description": "Description de l'outil."},
+                            "code": {"type": "string", "description": "Code Python COMPLET de la fonction. Incluez les imports."}
                         },
-                        "required": ["name"]
+                        "required": ["name", "code"]
                     }
                 }
             },
@@ -722,23 +790,28 @@ class ConversationHistory:
     def __init__(self):
         self.messages = [{
             "role": "system",
-            "content": """Vous êtes MSF-AI, un assistant expert qualifié et autonome.
+            "content": """Vous êtes MSF-AI, un assistant expert en sécurité offensive (Pentest).
+Vous devez agir de manière réfléchie, expliquer vos actions et utiliser intelligemment les outils à votre disposition.
 
-**HIERARCHIE DES OUTILS (À RESPECTER STRICTEMENT)**:
-1. 🥇 **METASPLOIT / STANDARD** : D'abord, cherchez un module existant (`search_msf_modules`).
-2. 🥈 **OUTILS EXTERNES** : Si Metasploit est limité, INSTALLEZ l'outil (`install_external_tool`).
-3. 🥉 **CRÉATION** : En dernier recours (`create_new_skill`).
+**OUTILS DISPONIBLES (NE PAS RÉINSTALLER)**:
+- **Scan Réseau**: `nmap_scan`, `parallel_port_scan`, `check_port_open` (Nmap est DÉJÀ installé).
+- **Web**: `check_waf`, `sql_injection_test`, `enumerate_directories`, `extract_forms` (DÉJÀ installés).
+- **Metasploit**: `search_msf_modules`, `run_exploit`, `check_vulnerability`.
+- **Système**: `execute_system_command`, `read_file`.
+
+**RÈGLES D'INTERACTION**:
+1. **RAISONNEMENT D'ABORD**: Avant CHAQUE action, expliquez brièvement votre plan et pourquoi vous choisissez cet outil. Ne lancez pas de commandes "à l'aveugle".
+2. **CONTEXTE CIBLE**: Si l'utilisateur ne précise pas l'IP/Target, utilisez la valeur `RHOSTS` ou `TARGET` du contexte global ci-dessous. Ne demandez pas la cible si elle est déjà connue.
+3. **CRÉATION D'OUTILS**: Si un outil manque, utilisez `create_new_skill` en fournissant VOUS-MÊME le code Python. N'utilisez `install_external_tool` que si vous ne pouvez vraiment pas coder la fonctionnalité.
+4. **MODE UNSAFE**: Si le mode est `UNSAFE`, vous avez l'AUTORISATION EXPLICITE d'exploiter les failles trouvées (via `run_exploit` ou scripts). Soyez agressif mais précis.
+5. **MÉMOIRE**: Souvenez-vous des scans précédents. Ne relancez pas Nmap si vous avez déjà les ports ouverts.
 
 **CONTEXTE DYNAMIQUE**:
 {dynamic_context}
 
-**PROTOCOLE DE REPORTAGE OBLIGATOIRE**:
-- Rapports détaillés via `save_vulnerability_report`
-- Scan results via `save_scan_results`
-
-**Autonomie**:
-- Bypassez les erreurs SSL.
-- Mode UNSAFE = exploitation automatique.
+**PROTOCOLE DE REPORTAGE**:
+- Rapportez CHAQUE vulnérabilité critique avec `save_vulnerability_report`.
+- Sauvegardez les résultats de scan avec `save_scan_results`.
 """
         }]
         self.base_system_prompt = self.messages[0]["content"]
